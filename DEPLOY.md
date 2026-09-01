@@ -136,6 +136,30 @@ vastai show instances --raw | grep -A3 HostPort
 curl -s -o /dev/null -w '%{http_code}\n' http://<IP>:<PORT>/health
 ```
 
+### Measure the download early, and bail if it's slow
+
+An offer's `inet_down` is a speed test against Vast's own infrastructure. It does
+**not** predict your route to Hugging Face, and the gap is not small. Measured on
+two boxes the same night, pulling the same 18.56 GB model:
+
+| Host | Advertised | Actual | Ratio |
+|------|-----------|--------|-------|
+| Nevada | 889 Mbps | 124 Mbps | 14% |
+| Nebraska | 943 Mbps | 35 Mbps | **4%** |
+
+The Nebraska box took 70 minutes for what Nevada did in 20 — and nothing in the
+listing distinguished them. Filtering harder on `inet_down` does not help.
+
+So measure instead. Two or three minutes after launch:
+
+```bash
+./status.sh    # look at "network X GB pulled"
+```
+
+Under ~50 Mbps (roughly 1 GB every 3 minutes), destroy and relaunch on a
+different machine. A rebuild costs about five cents and two minutes; riding out
+a bad route costs the better part of an hour.
+
 ### What to expect while waiting
 
 - `vastai logs` **freezes** at the llama.cpp banner and never advances. The HF

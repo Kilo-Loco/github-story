@@ -65,8 +65,22 @@ if st.button("Tell me their story", type="primary", disabled=not url.strip()):
                 st.session_state["story"] = st.write_stream(story_stream())
                 st.session_state["story_url"] = url
 
-            except Exception as exc:  # rate limits, empty profiles, endpoint down
-                st.error(f"{type(exc).__name__}: {exc}")
+            except Exception as exc:
+                # The model takes ~25 minutes to download and load, while the app
+                # is serving within 90 seconds. Anyone who arrives in that window
+                # gets a connection error, so say what is actually happening
+                # instead of showing them a Python exception name.
+                name = type(exc).__name__
+                if "Connection" in name or "APIError" in name or "Timeout" in name:
+                    st.warning(
+                        "The GPU is still waking up — the model takes a few "
+                        "minutes to load after the site comes online. "
+                        "Try again shortly."
+                    )
+                elif "rate limit" in str(exc).lower():
+                    st.warning(str(exc))
+                else:
+                    st.error(str(exc) or name)
 
 # Survive the rerun that any later widget interaction causes.
 elif st.session_state.get("story"):

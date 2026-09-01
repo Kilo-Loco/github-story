@@ -3,6 +3,7 @@ app.py — the entire UI. Everything with substance lives in pipeline.py;
 this file only turns pipeline events into Streamlit widgets.
 """
 
+import pathlib
 import threading
 
 import streamlit as st
@@ -77,3 +78,11 @@ st.caption(
     "rented from [Vast.ai](https://vast.ai) — no frontier API involved. "
     "Public commit history only."
 )
+
+# The box tunnels itself out through cloudflared and writes the resulting
+# HTTPS hostname here. Quick-tunnel URLs are random and change on every boot,
+# so the machine reporting its own address is the only reliable way to learn it
+# — Vast's log endpoint serves a cached snapshot and never shows it.
+_TUNNEL = pathlib.Path(__file__).parent / "tunnel_url.txt"
+if _TUNNEL.exists():
+    st.caption(f"HTTPS link for this session: {_TUNNEL.read_text().strip()}")

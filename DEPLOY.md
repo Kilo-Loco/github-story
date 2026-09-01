@@ -38,9 +38,74 @@ Template `github-story-qwen3-coder-30b` (id `658939`) carries the image,
 the `LLAMA_ARG_*` settings, 60 GB disk, and a 4090 search filter. Pick an
 offer in the Vast UI and launch it.
 
-### Option B — the CLI, start to finish
+### Option B — one box, both services (what's actually deployed)
 
-This is the path that was actually verified end to end.
+The model API *and* the Streamlit app run in a single container. No second
+instance, no cross-instance networking, and llama.cpp never touches the public
+internet.
+
+The trick is `--entrypoint`. The `llama.cpp:server-cuda` image has
+`llama-server` as its ENTRYPOINT, so by default `--args` are arguments to
+llama-server — which is why a stray `--raw` crash-loops the container. Override
+the entrypoint to `/bin/bash` and `--args -c "..."` becomes a shell script:
+
+```bash
+GHT=$(grep '^GITHUB_TOKEN=' .env | cut -d= -f2)
+
+BOOT='set -x; ls -la /app || true;
+  export DEBIAN_FRONTEND=noninteractive;
+  apt-get update -qq; apt-get install -y -qq python3-pip git;
+  git clone --depth 1 https://github.com/Kilo-Loco/github-story /opt/app;
+  pip3 install -q --break-system-packages -r /opt/app/requirements.txt
+    || pip3 install -q -r /opt/app/requirements.txt;
+  export MODEL_BASE_URL=http://127.0.0.1:8000/v1;
+  ( cd /app && LD_LIBRARY_PATH=/app ./llama-server
+      --host 127.0.0.1 --port 8000 -ngl 99 -c 16384
+      -hf unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q4_K_M 2>&1
+      | sed "s/^/[llama] /" ) &
+  cd /opt/app;
+  exec streamlit run app.py --server.port 8501 --server.address 0.0.0.0
+      --server.headless true --browser.gatherUsageStats false'
+
+vastai create instance <OFFER_ID> \
+  --image ghcr.io/ggml-org/llama.cpp:server-cuda \
+  --disk 60 \
+  --env "-p 8501:8501 -e GITHUB_TOKEN=$GHT \
+         -e MODEL_NAME=unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q4_K_M" \
+  --entrypoint /bin/bash \
+  --raw \
+  --args -c "$BOOT"
+```
+
+Three things in there are load-bearing:
+
+- **`LD_LIBRARY_PATH=/app`.** Putting `/app` on `PATH` finds the `llama-server`
+  binary but not its shared objects, and it dies with
+  `error while loading shared libraries: libllama-server-impl.so`. Run it from
+  `/app` with `LD_LIBRARY_PATH` set.
+- **`--break-system-packages`.** The image is Ubuntu 24.04, so pip refuses to
+  install into the system environment (PEP 668) without it. The `||` fallback
+  covers older bases that don't recognise the flag.
+- **llama.cpp binds `127.0.0.1`, and only 8501 is published.** The model API is
+  not reachable from the internet — Streamlit talks to it over localhost inside
+  the container. llama.cpp ships with CORS open to `*` and no API key, so
+  exposing port 8000 would hand anyone a free GPU.
+
+Only the app port is mapped, so the public URL is
+`http://<IP>:<HOST_PORT_FOR_8501>`. Vast assigns that host port at random on
+every launch:
+
+```bash
+vastai show instances --raw | grep -A3 HostPort
+```
+
+The app comes up in about 90 seconds. The model takes ~20 minutes more, so the
+UI is live and usable well before stories will generate.
+
+### Option C — the CLI, model only
+
+Serves just the API, with no app on the box. Useful when you're pointing a
+local Streamlit (or anything else) at the endpoint during development.
 
 ```bash
 # 1. Find an on-demand 4090. NOT interruptible: an interruptible instance can

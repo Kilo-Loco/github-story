@@ -1,5 +1,9 @@
 # GitHub Story
 
+**Live demo: http://173.239.92.155:42215**
+(running on the rented GPU described below; the port changes whenever the box
+is rebuilt)
+
 Paste a GitHub profile. Get the story of what that developer has been building,
 written by a 30B model running on a single RTX 4090 rented from
 [Vast.ai](https://vast.ai) for about 34 cents an hour.

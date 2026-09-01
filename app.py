@@ -3,14 +3,23 @@ app.py — the entire UI. Everything with substance lives in pipeline.py;
 this file only turns pipeline events into Streamlit widgets.
 """
 
+import json
 import pathlib
 import threading
+import urllib.parse
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 import pipeline
 
 st.set_page_config(page_title="GitHub Story", page_icon="📖")
+
+# The box tunnels itself out through cloudflared and writes the resulting HTTPS
+# hostname here. Quick-tunnel URLs are random per boot, so the machine reporting
+# its own address is the only reliable way to learn it.
+_TUNNEL = pathlib.Path(__file__).parent / "tunnel_url.txt"
+PUBLIC_URL = _TUNNEL.read_text().strip() if _TUNNEL.exists() else ""
 
 
 # One story at a time. The site is public and every story is GPU time on a
@@ -25,6 +34,52 @@ def _gpu_lock() -> threading.Lock:
 @st.cache_data(ttl=3600, show_spinner=False)
 def _cached_fetch(url: str) -> dict:
     return pipeline.fetch_all(url)
+
+
+def share_controls(story: str, target: str) -> None:
+    """Copy-to-clipboard and share-on-X.
+
+    Streamlit has no native copy button for prose (st.code gives you one, but
+    renders monospace, which reads badly for a story). So this is a small
+    self-contained HTML block: json.dumps safely escapes the story into a JS
+    string literal, including the quotes and newlines a story is full of.
+    """
+    teaser = (
+        f"I ran {target}'s commit history through GitHub Story — the whole thing "
+        f"is written by a 30B model self-hosted on one RTX 4090 rented from Vast.ai."
+    )
+    intent = "https://x.com/intent/post?" + urllib.parse.urlencode(
+        {"text": teaser, "url": PUBLIC_URL or "https://github.com/Kilo-Loco/github-story"}
+    )
+
+    components.html(
+        f"""
+        <style>
+          .row {{ display:flex; gap:.5rem; font-family:-apple-system,system-ui,sans-serif; }}
+          .btn {{
+            flex:0 0 auto; padding:.45rem .9rem; border-radius:.5rem; cursor:pointer;
+            border:1px solid rgba(128,128,128,.4); background:transparent;
+            color:inherit; font-size:.85rem; text-decoration:none; line-height:1.4;
+          }}
+          .btn:hover {{ border-color:rgba(128,128,128,.9); }}
+        </style>
+        <div class="row">
+          <button class="btn" id="c" onclick="copyStory()">Copy story</button>
+          <a class="btn" href="{intent}" target="_blank" rel="noopener">Share on X</a>
+        </div>
+        <script>
+          const STORY = {json.dumps(story)};
+          function copyStory() {{
+            navigator.clipboard.writeText(STORY).then(() => {{
+              const b = document.getElementById("c");
+              b.textContent = "Copied";
+              setTimeout(() => b.textContent = "Copy story", 1600);
+            }});
+          }}
+        </script>
+        """,
+        height=52,
+    )
 
 
 st.title("📖 GitHub Story")
@@ -64,6 +119,7 @@ if st.button("Tell me their story", type="primary", disabled=not url.strip()):
 
                 st.session_state["story"] = st.write_stream(story_stream())
                 st.session_state["story_url"] = url
+                share_controls(st.session_state["story"], url.rstrip("/").split("/")[-1])
 
             except Exception as exc:
                 # The model takes ~25 minutes to download and load, while the app
@@ -85,6 +141,10 @@ if st.button("Tell me their story", type="primary", disabled=not url.strip()):
 # Survive the rerun that any later widget interaction causes.
 elif st.session_state.get("story"):
     st.markdown(st.session_state["story"])
+    share_controls(
+        st.session_state["story"],
+        st.session_state.get("story_url", "").rstrip("/").split("/")[-1],
+    )
 
 st.divider()
 st.caption(
@@ -92,11 +152,5 @@ st.caption(
     "rented from [Vast.ai](https://vast.ai) — no frontier API involved. "
     "Public commit history only."
 )
-
-# The box tunnels itself out through cloudflared and writes the resulting
-# HTTPS hostname here. Quick-tunnel URLs are random and change on every boot,
-# so the machine reporting its own address is the only reliable way to learn it
-# — Vast's log endpoint serves a cached snapshot and never shows it.
-_TUNNEL = pathlib.Path(__file__).parent / "tunnel_url.txt"
-if _TUNNEL.exists():
-    st.caption(f"HTTPS link for this session: {_TUNNEL.read_text().strip()}")
+if PUBLIC_URL:
+    st.caption(f"HTTPS link for this session: {PUBLIC_URL}")

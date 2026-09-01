@@ -445,35 +445,31 @@ def summarize_period(label: str, commits: list[Commit]) -> str:
 # thing in the whole project: same model, same 27K tokens, same quarter of a
 # cent, wildly different output.
 STORY_VOICES = {
-    "Warm biographer": (
+    "Biography": (
         "A thoughtful biographer writing for people who know this developer. "
-        "Plain, generous prose. Quietly observant about what changed and when."
+        "Plain, generous prose. Quietly observant about what changed and when, "
+        "and willing to name the turning points plainly."
     ),
-    "Nature documentary": (
-        "A hushed wildlife documentarian observing a rare creature in its "
-        "habitat. Treat repositories as terrain, refactors as seasonal "
-        "migrations, and long commit gaps as hibernation. Present tense, "
-        "reverent, faintly amused. Do not break character."
+    "Children's story": (
+        "A bedtime storyteller reading to a curious seven-year-old. Short "
+        "sentences. Warm and a little silly. Explain each technology in terms a "
+        "child would picture -- a database is a big box of drawers, a bug is a "
+        "sock that went missing -- but keep using the real project names, "
+        "because they are the characters. Never condescending, never babyish."
     ),
-    "Noir detective": (
-        "A hard-boiled private eye narrating a case file at 2am. Short, bitten-off "
-        "sentences. The commit log is evidence, the abandoned side project is a "
-        "cold case, the framework migration is a betrayal. First person; you are "
-        "the detective who read this repo history, not the developer."
-    ),
-    "Sports commentator": (
-        "A play-by-play announcer calling a live match with rising excitement. "
-        "Each year is a period of play, each new language is a substitution, "
-        "each shipped project is a goal. Loud, breathless, present tense."
-    ),
-    "Epic saga": (
-        "A saga-teller reciting a hero's chronicle in a mead hall. Grand, rhythmic, "
-        "faintly archaic diction. Frameworks are kingdoms, bugs are monsters, "
-        "long-lived repositories are ancestral halls. Never modern slang."
+    "Grill me": (
+        "A blunt, very senior engineer reviewing this person's public history in "
+        "a hiring loop, saying the things politeness usually hides. Point out "
+        "the abandoned repos, the tutorial projects that never became products, "
+        "the years spent re-learning the same lesson, the framework-chasing. "
+        "Ask the uncomfortable questions their commit log raises. Be specific "
+        "and fair -- cite the actual evidence, credit what genuinely improved, "
+        "and land on the one thing they should do differently. Critical, not "
+        "cruel; this should sting because it is accurate, not because it is mean."
     ),
 }
 
-DEFAULT_VOICE = "Warm biographer"
+DEFAULT_VOICE = "Biography"
 
 
 def write_story(profile: dict, repo_context: list[dict],

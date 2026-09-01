@@ -20,7 +20,15 @@ d = rows[0]
 disk = d.get("disk_usage") or 0
 vram = d.get("vmem_usage") or 0
 net  = (d.get("inet_down_billed") or 0) / 1e6
-port = next((x["HostPort"] for v in (d.get("ports") or {}).values() for x in v), None)
+# Pick the APP port specifically. Taking "the first port" printed the ssh
+# mapping once we started publishing more than one.
+ports = d.get("ports") or {}
+port = next((x["HostPort"] for x in ports.get("8501/tcp", [])), None)
+sshp = next((x["HostPort"] for x in ports.get("22/tcp", [])), None)
+
+# Some hosts report no telemetry at all (disk -1, net None). Say so rather than
+# rendering "0% of model" forever and implying nothing is happening.
+blind = disk < 0 or not d.get("inet_down_billed")
 
 # vmem is the ONLY honest readiness signal: ~0.5GB while downloading, ~19.6GB
 # once the weights are resident on the GPU.
@@ -34,6 +42,8 @@ if vram > 15:
     state = "READY - model resident on GPU"
 elif net >= MODEL_GB:
     state = "download complete, loading into VRAM"
+elif blind:
+    state = "no telemetry from this host - progress unknown, watch the app instead"
 else:
     state = "downloading weights ({:.0f}% of model)".format(100 * net / MODEL_GB)
 
@@ -41,6 +51,8 @@ iid, st, rate = d.get("id"), d.get("actual_status"), d.get("dph_total", 0)
 ip = d.get("public_ipaddr")
 print("instance  {}  [{}]  ${:.4f}/hr".format(iid, st, rate))
 print("app       http://{}:{}".format(ip, port) if port else "app       (port not mapped yet)")
+if sshp:
+    print("ssh       ssh -p {} root@{}".format(sshp, ip))
 print("disk      {:.1f} GB / ~21 GB".format(disk))
 print("vram      {:.2f} GB / ~19.6 GB when loaded".format(vram))
 print("network   {:.2f} GB pulled".format(net))

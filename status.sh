@@ -22,11 +22,20 @@ vram = d.get("vmem_usage") or 0
 net  = (d.get("inet_down_billed") or 0) / 1e6
 port = next((x["HostPort"] for v in (d.get("ports") or {}).values() for x in v), None)
 
-# vmem is the honest readiness signal: ~0.5GB while downloading, ~19.6GB once
-# the weights are resident on the GPU.
-if vram > 15:   state = "READY - model resident on GPU"
-elif disk > 19: state = "loading weights into VRAM"
-else:           state = "downloading weights"
+# vmem is the ONLY honest readiness signal: ~0.5GB while downloading, ~19.6GB
+# once the weights are resident on the GPU.
+#
+# Do not infer readiness from disk_usage. Disk holds the container image (~2.5GB)
+# as well as the model, so disk can read 20GB while ~2GB of weights are still in
+# flight. Compare bytes pulled against the model size instead -- and even then,
+# treat it as progress, not readiness.
+MODEL_GB = 18.56
+if vram > 15:
+    state = "READY - model resident on GPU"
+elif net >= MODEL_GB:
+    state = "download complete, loading into VRAM"
+else:
+    state = "downloading weights ({:.0f}% of model)".format(100 * net / MODEL_GB)
 
 iid, st, rate = d.get("id"), d.get("actual_status"), d.get("dph_total", 0)
 ip = d.get("public_ipaddr")

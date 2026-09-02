@@ -84,17 +84,25 @@ def share_controls(story: str, target: str) -> None:
     components.html(
         f"""
         <style>
+          /* components.html renders in an IFRAME, which does not inherit
+             Streamlit's theme. "color: inherit" resolves against the iframe's
+             own default styles, not the app's, so the labels came out nearly
+             invisible. Every colour here is therefore explicit, and chosen to
+             hold contrast against both the light and dark Streamlit themes. */
           .row {{ display:flex; gap:.5rem; font-family:-apple-system,system-ui,sans-serif; }}
           .btn {{
-            flex:0 0 auto; padding:.45rem .9rem; border-radius:.5rem; cursor:pointer;
-            border:1px solid rgba(128,128,128,.4); background:transparent;
-            color:inherit; font-size:.85rem; text-decoration:none; line-height:1.4;
+            flex:0 0 auto; padding:.5rem 1rem; border-radius:.5rem; cursor:pointer;
+            font-size:.85rem; font-weight:500; text-decoration:none; line-height:1.4;
+            border:1px solid #4A4A57; background:#262730; color:#FAFAFA;
+            transition:background .15s ease, border-color .15s ease;
           }}
-          .btn:hover {{ border-color:rgba(128,128,128,.9); }}
+          .btn:hover {{ background:#3A3B47; border-color:#6E6E7B; }}
+          .btn.x {{ background:#000; border-color:#000; }}
+          .btn.x:hover {{ background:#1a1a1a; border-color:#333; }}
         </style>
         <div class="row">
           <button class="btn" id="c" onclick="copyStory()">Copy story</button>
-          <a class="btn" href="{intent}" target="_blank" rel="noopener">Share on X</a>
+          <a class="btn x" href="{intent}" target="_blank" rel="noopener">Share on 𝕏</a>
         </div>
         <script>
           const STORY = {json.dumps(story)};
@@ -107,7 +115,7 @@ def share_controls(story: str, target: str) -> None:
           }}
         </script>
         """,
-        height=52,
+        height=56,
     )
 
 

@@ -17,8 +17,7 @@ Children's story, or Grill me.
    placeholder fails with a 401. Saving makes your own copy of the template;
    that's expected.
 2. Rent any RTX 4090 with 60 GB disk.
-3. Weights take ~5 minutes. Open the mapped port **8501** — the footer shows
-   that instance's HTTPS link.
+3. Weights take ~5 minutes, then open the mapped port **8501**.
 
 Or from the CLI:
 

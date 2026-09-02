@@ -10,13 +10,9 @@ set -x
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update -qq
-apt-get install -y -qq python3-pip curl
+apt-get install -y -qq python3-pip
 pip3 install -q --break-system-packages -r /opt/app/requirements.txt \
   || pip3 install -q -r /opt/app/requirements.txt
-
-curl -sSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
-  -o /usr/local/bin/cloudflared
-chmod +x /usr/local/bin/cloudflared
 
 # llama-server needs LD_LIBRARY_PATH: /app holds the binary AND its shared
 # objects, and it dies on libllama-server-impl.so without this.
@@ -27,11 +23,6 @@ chmod +x /usr/local/bin/cloudflared
 ( cd /app && LD_LIBRARY_PATH=/app ./llama-server \
     --host 127.0.0.1 --port 8000 -ngl 99 -c 16384 \
     -hf unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q4_K_M > /var/log/llama.log 2>&1 ) &
-
-# Quick tunnel for an HTTPS link. The hostname is random on every start, so
-# nothing caches it -- app.py reads the tail of this log at render time.
-( cloudflared tunnel --url http://127.0.0.1:8501 --no-autoupdate \
-    --logfile /tmp/cf.log > /var/log/cf.log 2>&1 ) &
 
 ( cd /opt/app && MODEL_BASE_URL=http://127.0.0.1:8000/v1 streamlit run app.py \
     --server.port 8501 --server.address 0.0.0.0 --server.headless true \

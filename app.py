@@ -4,8 +4,6 @@ this file only turns pipeline events into Streamlit widgets.
 """
 
 import json
-import pathlib
-import re
 import threading
 import time
 import urllib.parse
@@ -16,39 +14,6 @@ import streamlit.components.v1 as components
 import pipeline
 
 st.set_page_config(page_title="GitHub Story", page_icon="📖")
-
-# The box tunnels itself out through cloudflared, which picks a RANDOM hostname
-# every time it starts. A file written once at boot goes stale the moment the
-# tunnel reconnects under a new name -- observed exactly that. So read the live
-# log on each rerun and take the LAST hostname it announced, which is by
-# definition the current one.
-_CF_LOG = pathlib.Path("/tmp/cf.log")
-_TUNNEL_FILE = pathlib.Path(__file__).parent / "tunnel_url.txt"
-_HOSTNAME = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
-
-
-def public_url() -> str:
-    """Current tunnel hostname, or "" if there isn't one."""
-    try:
-        # The log grows unbounded; only the tail can hold the newest hostname.
-        size = _CF_LOG.stat().st_size
-        with _CF_LOG.open("rb") as fh:
-            fh.seek(max(0, size - 65536))
-            found = _HOSTNAME.findall(fh.read().decode("utf-8", "replace"))
-        if found:
-            return found[-1]
-    except OSError:
-        pass
-    try:
-        return _TUNNEL_FILE.read_text().strip()   # fallback for odd setups
-    except OSError:
-        return ""
-
-# Deliberately no template hash here: Vast rotates a template's hash_id on every
-# edit, so any hash baked into this page goes stale the next time the template is
-# touched. The repo carries the current one.
-TEMPLATE_NAME = "github-story-qwen3-coder-4090"
-
 
 # One story at a time. The site is public and every story is GPU time on a
 # single 4090, so a global lock is the whole abuse story: a second visitor
@@ -105,7 +70,7 @@ def share_controls(story: str, target: str) -> None:
         f"is written by a 30B model self-hosted on one RTX 4090 rented from Vast.ai."
     )
     intent = "https://x.com/intent/post?" + urllib.parse.urlencode(
-        {"text": teaser, "url": public_url() or "https://github.com/Kilo-Loco/github-story"}
+        {"text": teaser, "url": "https://github.com/Kilo-Loco/github-story"}
     )
 
     components.html(
@@ -218,9 +183,6 @@ st.caption(
     "**RTX 4090** rented from [Vast.ai](https://vast.ai) — no frontier API "
     "involved. Public commit history only."
 )
-_url = public_url()
-if _url:
-    st.caption(f"This instance is reachable at {_url}")
 st.caption(
     f"Run your own on a 4090: search Vast.ai templates for **{TEMPLATE_NAME}** · "
     "[source & setup](https://github.com/Kilo-Loco/github-story)"

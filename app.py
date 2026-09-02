@@ -184,6 +184,6 @@ st.caption(
     "involved. Public commit history only."
 )
 st.caption(
-    f"Run your own on a 4090: search Vast.ai templates for **{TEMPLATE_NAME}** · "
-    "[source & setup](https://github.com/Kilo-Loco/github-story)"
+    f"Run this yourself on a 4090: [one-click Vast.ai template]({TEMPLATE_URL}) · "
+    "[source](https://github.com/Kilo-Loco/github-story)"
 )

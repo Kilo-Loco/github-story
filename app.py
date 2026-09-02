@@ -6,6 +6,7 @@ this file only turns pipeline events into Streamlit widgets.
 import json
 import pathlib
 import threading
+import time
 import urllib.parse
 
 import streamlit as st
@@ -25,9 +26,37 @@ PUBLIC_URL = _TUNNEL.read_text().strip() if _TUNNEL.exists() else ""
 # One story at a time. The site is public and every story is GPU time on a
 # single 4090, so a global lock is the whole abuse story: a second visitor
 # waits rather than queueing a parallel decode that halves everyone's speed.
+#
+# It carries a timestamp because a plain lock is not safe here. If a visitor
+# closes the tab mid-story, Streamlit kills the script thread and the `with`
+# block never unwinds, so the lock is held forever and the site is wedged for
+# everyone until the process restarts. Observed exactly that. So we record when
+# the lock was taken and reclaim it once no story could still plausibly be
+# running.
+STALE_AFTER = 180  # seconds; a full story takes ~25
+
+
 @st.cache_resource
-def _gpu_lock() -> threading.Lock:
-    return threading.Lock()
+def _gpu_gate() -> dict:
+    return {"lock": threading.Lock(), "taken_at": 0.0}
+
+
+def _acquire_gpu() -> bool:
+    gate = _gpu_gate()
+    if gate["lock"].acquire(blocking=False):
+        gate["taken_at"] = time.time()
+        return True
+    if time.time() - gate["taken_at"] > STALE_AFTER:
+        gate["taken_at"] = time.time()   # steal it; the holder is gone
+        return True
+    return False
+
+
+def _release_gpu() -> None:
+    try:
+        _gpu_gate()["lock"].release()
+    except RuntimeError:
+        pass   # already released, or we stole it from a dead holder
 
 
 # Same profile twice inside an hour = zero GitHub calls. Cheapest guard there is.
@@ -92,10 +121,10 @@ voice = st.selectbox("Narrator", list(pipeline.STORY_VOICES))
 # every widget interaction, and an ungated pipeline would refetch and regenerate
 # each time.
 if st.button("Tell me their story", type="primary", disabled=not url.strip()):
-    if _gpu_lock().locked():
+    if not _acquire_gpu():
         st.warning("Someone else's story is generating right now — try again in a minute.")
     else:
-        with _gpu_lock():
+        try:
             try:
                 with st.status("Reading public history...", expanded=True) as status:
                     events = pipeline.run(url, prefetched=_cached_fetch(url), voice=voice)
@@ -137,6 +166,8 @@ if st.button("Tell me their story", type="primary", disabled=not url.strip()):
                     st.warning(str(exc))
                 else:
                     st.error(str(exc) or name)
+        finally:
+            _release_gpu()
 
 # Survive the rerun that any later widget interaction causes.
 elif st.session_state.get("story"):

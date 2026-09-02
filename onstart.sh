@@ -10,7 +10,25 @@ set -x
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update -qq
-apt-get install -y -qq python3-pip
+apt-get install -y -qq python3-pip openssh-server
+
+# Vast does NOT inject an SSH daemon -- its docs require the image to ship one,
+# and llama.cpp's does not. Without this you reach Vast's proxy, see its banner,
+# and get "Permission denied (publickey)" because nothing is listening inside.
+#
+# AuthorizedKeysFile is set to an absolute path on purpose: this image ships an
+# sshd_config whose default pointed somewhere the key was never written, which
+# cost an hour of debugging a correct key against a daemon reading the wrong file.
+mkdir -p /var/run/sshd
+echo 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINrfq47OOm4qhcuBWLGOKgg+SrmGRG+a+n06jPJoA5I7 kyle@kiloloco.com' > /etc/ssh/authorized_keys
+chmod 600 /etc/ssh/authorized_keys
+ssh-keygen -A
+sed -i 's|^#*AuthorizedKeysFile.*|AuthorizedKeysFile /etc/ssh/authorized_keys|' /etc/ssh/sshd_config
+sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+sed -i 's/^#*UsePAM.*/UsePAM no/' /etc/ssh/sshd_config
+/usr/sbin/sshd
+echo "--- sshd started, authorized_keys $(wc -c < /etc/ssh/authorized_keys) bytes ---"
+
 pip3 install -q --break-system-packages -r /opt/app/requirements.txt \
   || pip3 install -q -r /opt/app/requirements.txt
 

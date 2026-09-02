@@ -34,6 +34,28 @@ leave it stopped the night before a demo — start it early enough to fail over.
 
 ### Option A — the saved template
 
+Public template **`github-story-qwen3-coder-4090`** (id `663584`).
+
+```bash
+vastai create instance <OFFER_ID> --template_hash <HASH> --disk 60
+```
+
+Get `<HASH>` fresh each time — **Vast rotates a template's `hash_id` on every
+edit**, so a hash written down anywhere is stale as soon as the template is
+touched again. The id (`663584`) is stable; the hash is not:
+
+```bash
+curl -s https://console.vast.ai/api/v0/users/current/templates/ \
+  -H "Authorization: Bearer $(cat ~/.config/vastai/vast_api_key)" \
+  | python3 -c "import json,sys;print([t['hash_id'] for t in json.load(sys.stdin) if t['id']==663584])"
+```
+
+The template ships `GITHUB_TOKEN=REPLACE_WITH_YOUR_GITHUB_TOKEN` so the field is
+visible in the launch dialog. Replace it with a classic no-scope token, or
+delete the variable to run unauthenticated at 60 requests/hour — which is fewer
+than one story.
+
+
 Template `github-story-qwen3-coder-30b` (id `658939`) carries the image,
 the `LLAMA_ARG_*` settings, 60 GB disk, and a 4090 search filter. Pick an
 offer in the Vast UI and launch it.

@@ -44,11 +44,10 @@ def public_url() -> str:
     except OSError:
         return ""
 
-# The public Vast.ai template that launches this whole stack on a 4090.
-# Linking the repo rather than a console URL: the console is a single-page app
-# that returns 200 for any path, so a template deep-link cannot be verified from
-# outside, and an unverified link in a footer is worse than none.
-TEMPLATE_HASH = "c66d0f469b333a0876fd52501847d268"
+# Deliberately no template hash here: Vast rotates a template's hash_id on every
+# edit, so any hash baked into this page goes stale the next time the template is
+# touched. The repo carries the current one.
+TEMPLATE_NAME = "github-story-qwen3-coder-4090"
 
 
 # One story at a time. The site is public and every story is GPU time on a
@@ -223,7 +222,6 @@ _url = public_url()
 if _url:
     st.caption(f"This instance is reachable at {_url}")
 st.caption(
-    "Run your own on a 4090: "
-    f"`vastai create instance <offer> --template_hash {TEMPLATE_HASH} --disk 60` · "
+    f"Run your own on a 4090: search Vast.ai templates for **{TEMPLATE_NAME}** · "
     "[source & setup](https://github.com/Kilo-Loco/github-story)"
 )

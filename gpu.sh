@@ -37,7 +37,9 @@ status() {
     echo "vram  $(nvidia-smi --query-gpu=memory.used --format=csv,noheader)"
     echo "up    $(ps -eo comm,etime | grep -E "llama-server|streamlit|cloudflared" | tr -s " " | tr "\n" " ")"
     curl -s -o /dev/null -w "llama %{http_code}\n" -m 3 http://127.0.0.1:8000/health 2>/dev/null || echo "llama down"
-    grep -oh "https://[a-z0-9-]*\.trycloudflare\.com" /tmp/cf.log 2>/dev/null | head -1
+    # tail, not head: cf.log accumulates across container restarts and each
+    # cloudflared run gets a NEW random hostname. head gives you a dead URL.
+    grep -oh "https://[a-z0-9-]*\.trycloudflare\.com" /tmp/cf.log 2>/dev/null | tail -1
   ' 2>/dev/null
 }
 

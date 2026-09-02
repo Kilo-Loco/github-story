@@ -178,6 +178,42 @@ a bad route costs the better part of an hour.
 
 ---
 
+## Operating a running box
+
+`./gpu.sh` talks to the instance over SSH — `status`, `watch`, `logs`, `shell`,
+and `forward` (which port-forwards the model API to `localhost:8000` so prompts
+can be tuned from a laptop without a rebuild).
+
+Two things that will bite you:
+
+**Streamlit is PID 1.** The boot script ends with `exec streamlit run ...`, so
+killing Streamlit kills the *container*. Do not `pkill` it to hot-reload — Vast
+restarts the container, which is survivable (the weights are cached on the
+instance disk, so it recovers in under a minute) but it drops every connection
+and rotates the tunnel URL. To pick up new code safely:
+
+```bash
+./gpu.sh shell
+cd /opt/app && git pull
+# then let Vast restart the container, or run streamlit under a supervisor loop
+```
+
+If you want true hot-reload, do not `exec` Streamlit. Run it in a loop so the
+shell stays PID 1:
+
+```bash
+while true; do streamlit run /opt/app/app.py --server.port 8501 \
+  --server.address 0.0.0.0 --server.headless true; sleep 2; done
+```
+
+**The tunnel URL rotates on every container restart.** `cloudflared` quick
+tunnels get a fresh random hostname each run, and `/tmp/cf.log` accumulates, so
+grep the LAST match, never the first — the first is a dead URL that returns 530.
+This is the main reason a quick tunnel is a recording tool, not a link you can
+publish.
+
+---
+
 ## Verifying it works
 
 ```bash

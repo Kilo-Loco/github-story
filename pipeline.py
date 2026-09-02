@@ -192,27 +192,13 @@ def fetch_repo_context(target: Target) -> list[dict]:
     ]
 
 
-# Commits come from ONE CALL PER REPO -- /repos/{owner}/{repo}/commits?author=X
-# -- fanned out with a thread pool. Measured against simonw (91 public repos):
-# 92 calls, 3.2s wall with 12 workers, 3,066 commits, and 4,953 of 5,000
-# requests still unspent.
+# One call per repo, fanned out with a thread pool. Measured against a 91-repo
+# profile: 92 calls, 3.2s wall with 12 workers, 3,066 commits, and 4,953 of
+# 5,000 requests still unspent.
 #
-# The obvious alternative, /search/commits?q=author:X, was tried first and
-# rejected. Two measured reasons:
-#
-#   It cannot sustain the volume. GitHub's secondary rate limit allows ~3
-#   commit-search calls per 30 seconds no matter how you pace them (8s spacing
-#   tripped at the 3rd call; recovery took 32s) while 24 of 30 primary requests
-#   were still unspent. A story needs ~10 calls.
-#
-#   It matches on the commit's AUTHOR EMAIL across every repo on GitHub, and
-#   anyone can put your address in their git config. `author:torvalds` returns
-#   429,964,072 results whose newest 100 are from a repo he has never touched.
-#   Asking each repo directly can only return commits from repos the user
-#   actually owns, so that is structurally impossible here.
-#
-# The tradeoff: this cannot see contributions to repos the user does not own.
-# Their own repos are the story.
+# This can only return commits from repos the user owns, which is the tradeoff:
+# contributions to other people's repos are invisible. Their own repos are the
+# story.
 MAX_REPOS_SCANNED = 60      # ~60 calls stays far inside the 5,000/hr core budget
 REPO_FETCH_WORKERS = 12     # measured: 91 repos in 3.2s, zero throttling
 

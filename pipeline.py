@@ -298,6 +298,17 @@ def _bucket_key(dt: datetime) -> str:
     return f"{dt.year} {half}"
 
 
+def _span_label(chunk: list[Commit]) -> str:
+    """Name a period after the dates it actually covers. Merging periods by
+    splicing their labels together produced things like "2021–2021 H2"."""
+    first = _bucket_key(min(c.date for c in chunk))
+    last = _bucket_key(max(c.date for c in chunk))
+    if first == last:
+        return first
+    start_year, end_year = first.split()[0], last.split()[0]
+    return start_year if start_year == end_year else f"{start_year}–{end_year}"
+
+
 def group_into_periods(commits: list[Commit]) -> list[tuple[str, list[Commit]]]:
     buckets: dict[str, list[Commit]] = defaultdict(list)
     for c in commits:
@@ -310,8 +321,8 @@ def group_into_periods(commits: list[Commit]) -> list[tuple[str, list[Commit]]]:
     merged: list[tuple[str, list[Commit]]] = []
     for label, chunk in periods:
         if merged and (len(chunk) < 10 or len(merged[-1][1]) < 10):
-            prev_label, prev_chunk = merged[-1]
-            merged[-1] = (f"{prev_label.split(' ')[0]}–{label}", prev_chunk + chunk)
+            prev_chunk = merged[-1][1]
+            merged[-1] = (_span_label(prev_chunk + chunk), prev_chunk + chunk)
         else:
             merged.append((label, chunk))
 
@@ -319,9 +330,8 @@ def group_into_periods(commits: list[Commit]) -> list[tuple[str, list[Commit]]]:
     # keeps a full story under ~2 minutes on the 4090.
     while len(merged) > MAX_PERIODS:
         idx = min(range(len(merged) - 1), key=lambda i: len(merged[i][1]) + len(merged[i + 1][1]))
-        a_label, a_chunk = merged[idx]
-        b_label, b_chunk = merged[idx + 1]
-        merged[idx] = (f"{a_label.split('–')[0]}–{b_label}", a_chunk + b_chunk)
+        a_chunk, b_chunk = merged[idx][1], merged[idx + 1][1]
+        merged[idx] = (_span_label(a_chunk + b_chunk), a_chunk + b_chunk)
         del merged[idx + 1]
 
     return merged

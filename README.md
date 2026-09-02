@@ -36,12 +36,14 @@ vastai create instance <OFFER_ID> --template_hash <HASH> --disk 60 \
   --env '-p 8501:8501 -e GITHUB_TOKEN=ghp_your_token'
 ```
 
-Fetch `<HASH>` fresh; Vast rotates it on every template edit. The id (`664556`)
-is stable:
+Get `<HASH>` from the template card in the console: the **⋮** menu has
+**Copy template hash**. Grab it fresh each time — Vast rotates a template's
+hash on every edit.
+
+Find an offer with:
 
 ```bash
-vastai search templates --raw | python3 -c \
-  "import json,sys;print([t['hash_id'] for t in json.load(sys.stdin) if t.get('id')==664556])"
+vastai search offers 'gpu_name=RTX_4090 num_gpus=1 rentable=true' -o dph
 ```
 
 The template's only job is to clone this repo and run [`onstart.sh`](onstart.sh),

@@ -1,185 +1,64 @@
 # GitHub Story
 
-**Live demo: http://173.239.92.155:42215**
-(running on the rented GPU described below; the port changes whenever the box
-is rebuilt)
+Paste a GitHub profile, get the story of what that developer has been building —
+written by **Qwen3-Coder-30B-A3B** (Q4_K_M) running on a single **RTX 4090**
+rented from [Vast.ai](https://vast.ai). No frontier API.
 
-Paste a GitHub profile. Get the story of what that developer has been building,
-written by a 30B model running on a single RTX 4090 rented from
-[Vast.ai](https://vast.ai) for about 34 cents an hour.
+**~25 seconds and ~$0.0026 per story.** Pick a narrator: Biography,
+Children's story, or Grill me.
 
-No frontier API is involved. Every token is generated on rented hardware, and a
-complete story costs **$0.00256** — a quarter of a cent.
+## Run it on Vast
 
-```
-paste a URL  ->  fetch public commits  ->  filter noise  ->  group into chapters
-             ->  summarize each chapter (one model call each)
-             ->  weave the chapters into one story (streamed)
-```
+Launch the public template **`github-story-qwen3-coder-4090`** (id `663584`) on
+any RTX 4090 with 60 GB disk. Replace `GITHUB_TOKEN` in the launch dialog with a
+classic token (**no scopes** — it only lifts the rate limit from 60/hr to
+5,000/hr). Give it ~5 minutes to pull the weights, then open the mapped port
+**8501**. The footer shows the instance's HTTPS link.
 
-Pick a narrator while you're at it: warm biographer, nature documentary, noir
-detective, sports commentator, or epic saga. The voice changes; the facts don't.
+> Vast rotates a template's `hash_id` on every edit, so look it up by the stable
+> id `663584` rather than trusting a hash written down anywhere.
 
----
+## Run it anywhere else
 
-## Why this is built the way it is
+`MODEL_BASE_URL` is any OpenAI-compatible endpoint.
 
-### The constraint that shaped everything: 16,384 tokens
-
-The model is `Qwen3-Coder-30B-A3B-Instruct`, Q4_K_M quantized to **18.56 GB**.
-On a 24 GB 4090 that leaves roughly 5 GB for KV cache, which llama.cpp turns
-into a **16,384 token** window.
-
-A prolific developer has thousands of commits. They do not fit. So the pipeline
-is a map/reduce: summarize each time period separately (the "map"), then weave
-those summaries into one story (the "reduce"). Two passes, one endpoint, one
-model — not because of multiple GPUs, but because the input is bigger than the
-window.
-
-`llama.cpp` reports `total_slots: 4`, which looks like it might divide the
-context four ways. It doesn't. Verified by feeding it an oversized prompt:
-
-```
-request (22907 tokens) exceeds the available context size (16384 tokens)
+```bash
+pip install -r requirements.txt
+export GITHUB_TOKEN=... MODEL_BASE_URL=http://localhost:8000/v1 MODEL_NAME=...
+streamlit run app.py
+python pipeline.py kilo-loco "Grill me"   # same pipeline, no UI
 ```
 
-Full 16K per request.
+## Why it's built this way
 
-### The data source is not the obvious one
+**The 16,384-token window drove the design.** The Q4_K_M quant is 18.56 GB of
+the 4090's 24 GB, leaving ~5 GB of KV cache. A prolific developer's history does
+not fit, so `pipeline.py` is a map/reduce: summarize each half-year period, then
+weave the summaries into one story. Two passes, one endpoint — not because of
+multiple GPUs, but because the input is bigger than the window.
 
-The obvious way to get someone's commits is GitHub's commit search API:
-`/search/commits?q=author:USERNAME`. It's one endpoint and it returns message,
-date, and repo in a single row.
+**Commit search is the obvious data source and the wrong one.** Measured:
+GitHub's secondary rate limit allows ~3 commit-search calls per 30s no matter
+how you pace them, and this needs ~10. It also matches on commit *email* across
+all of GitHub, so `author:torvalds` returns 429,964,072 results whose newest
+100 are from a repo he has never touched. The per-repo core endpoint
+(`/repos/{owner}/{repo}/commits?author=`) returned 3,066 commits in 3.2s using
+92 calls, left 4,953 of 5,000 unspent, and cannot be spoofed.
 
-It is also the wrong choice, for two measured reasons.
-
-**It can't sustain the request volume.** GitHub enforces an undocumented
-*secondary* rate limit on top of the published quota. Measured on one token:
-commit search tripped a 403 after **3 calls**, while 24 of 30 primary requests
-were still unspent. Pacing didn't help — 8 seconds between calls tripped at the
-same 3. Recovery took 32 seconds. This pipeline needs ~10 such calls.
-
-**It doesn't return what you think.** GitHub links commits to accounts by
-*email*, and commit search spans every repo on GitHub. So:
-
-```
-author:torvalds  ->  429,964,072 results
-```
-
-The newest 100 are from a repository Linus has never touched. Anyone can put
-any email in their git config.
-
-The fix is the boring core endpoint, one call per repo:
-
-```
-/repos/{owner}/{repo}/commits?author={login}
-```
-
-Different rate-limit bucket, and it can only return commits from repos the user
-actually owns, so spoofing is structurally impossible.
-
-| | commit search | per-repo core API |
-|---|---|---|
-| Calls needed | 10 | 92 |
-| Wall time | **fails** | **3.2s** (12 workers) |
-| Commits returned | ≤1,000 | 3,066 |
-| Quota left after | — | 4,953 / 5,000 |
-| Spoofable | yes | no |
-
-One best-effort commit-search call is kept as a garnish, to catch public
-contributions to repos the user *doesn't* own. If it 403s, it's skipped and the
-story is slightly thinner. It never fails the request.
-
-### Small decisions that mattered
-
-- **Noise filtering before any tokens are spent.** Merge commits, bot authors,
-  and runs of identical messages are dropped. Garbage in, boring story out.
-- **Chapters are time-based, not size-based.** Half-year buckets, sparse
-  neighbours merged, capped at 12. "Early 2023: the iOS era" is a chapter;
-  "commits 400-600" is not.
-- **Even sampling, never truncation.** A period over 250 commits is sampled
-  across its whole span, preserving its shape.
-- **Repo selection samples across *creation date*.** Taking the N most recently
-  pushed repos silently deletes someone's early years — which is the part worth
-  reading. On one test profile this was the difference between 63 and 164
-  visible repositories.
-
----
-
-## Measured performance
-
-RTX 4090, Q4_K_M, 16K context, llama.cpp `server-cuda`:
-
-| Prompt | Prefill | Generation |
-|---|---|---|
-| 907 tokens | 4,783 tok/s | 228 tok/s |
-| 3,762 tokens | 9,234 tok/s | 194 tok/s |
-| 6,662 tokens | 7,884 tok/s | 181 tok/s |
-
-Generation holds near 200 tok/s because A3B is a mixture-of-experts model:
-30B total parameters, only **3B active** per token.
-
-One complete story (2,168 commits, 12 chapters, 13 model calls):
+## Measured on a 4090
 
 | | |
 |---|---|
-| Input tokens | 27,056 |
-| Output tokens | 3,033 |
-| Wall time | **24.5s** (7.0s GitHub + ~17s GPU) |
-| Cost | **$0.00256** |
-| Throughput | 147 stories/hour · 390 stories per dollar |
+| Context | 16,384 tokens (per request — `total_slots` does not divide it) |
+| Generation | 180–228 tok/s |
+| One story | 2,168 commits → 13 model calls, 27k in / 3k out, 24.5s |
+| Cost | $0.00256 at $0.3767/hr · 390 stories per dollar |
 
----
-
-## Running it
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-cp .env.example .env      # then fill in GITHUB_TOKEN and MODEL_BASE_URL
-.venv/bin/streamlit run app.py
-```
-
-`GITHUB_TOKEN` is a classic token with **no scopes** — it exists only to lift
-the rate limit from 60/hr to 5,000/hr. Users never supply tokens; only public
-data is ever read.
-
-`MODEL_BASE_URL` is any OpenAI-compatible endpoint. See [DEPLOY.md](DEPLOY.md)
-for standing up llama.cpp on a Vast.ai 4090, including the failure modes worth
-knowing about.
-
-There's a CLI harness too, which runs the whole pipeline with no UI:
-
-```bash
-.venv/bin/python pipeline.py kilo-loco "Noir detective"
-```
-
----
-
-## Layout
-
-```
-pipeline.py   all the logic — fetch, filter, chapter, summarize, weave
-app.py        thin Streamlit shell over pipeline.run()
-DEPLOY.md     standing up the model on Vast.ai, with measured numbers
-```
-
-`pipeline.py` is deliberately one file. Every non-obvious decision has a comment
-next to it explaining what was measured and why the alternative was rejected.
-
----
+Generation stays fast because A3B is mixture-of-experts: 30B total parameters,
+**3B active** per token.
 
 ## Scope
 
-Public repositories only. No user tokens, no private data, no accounts, no
-database. One story generates at a time (a global lock), and fetches are cached
-for an hour per profile — the site is public and every story is GPU time.
-
-## What I'd build next
-
-The interesting version isn't this app — it's the thing underneath it. An agent
-that takes a Hugging Face model link, works out what hardware it actually needs
-(quant size, KV cache, context target), finds the cheapest Vast offer that fits,
-and emits a one-click deploy config. The 16K-context math in this README is the
-kind of arithmetic that agent would do automatically, and getting it wrong is
-the difference between a model that serves and a model that OOMs.
+Public repos only. No accounts, no database, no user tokens. One story generates
+at a time behind a global lock, and fetches are cached for an hour — the site is
+public and every story is GPU time.

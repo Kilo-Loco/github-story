@@ -9,14 +9,26 @@ Children's story, or Grill me.
 
 ## Run it on Vast
 
-Launch the public template **`github-story-qwen3-coder-4090`** (id `663584`) on
-any RTX 4090 with 60 GB disk. Replace `GITHUB_TOKEN` in the launch dialog with a
-classic token (**no scopes** — it only lifts the rate limit from 60/hr to
-5,000/hr). Give it ~5 minutes to pull the weights, then open the mapped port
-**8501**. The footer shows the instance's HTTPS link.
+Public template: **[github-story-qwen3-coder-4090](TEMPLATE_URL_PLACEHOLDER)**
+(id `663584`) — model and app in one container.
 
-> Vast rotates a template's `hash_id` on every edit, so look it up by the stable
-> id `663584` rather than trusting a hash written down anywhere.
+```bash
+vastai create instance <OFFER_ID> \
+  --template_hash f93e10a9bfafc40561b9b98b112c3440 --disk 60
+```
+
+Any RTX 4090 with 60 GB disk. Replace `GITHUB_TOKEN` in the launch dialog with a
+classic token (**no scopes** — it only lifts the rate limit from 60/hr to
+5,000/hr). Weights take ~5 minutes; then open the mapped port **8501**. The
+footer shows that instance's HTTPS link.
+
+> Vast rotates a template's `hash_id` on every edit. If that one is stale, look
+> it up by the stable id `663584`.
+
+The template's only job is to clone this repo and run [`onstart.sh`](onstart.sh),
+which starts llama.cpp on localhost and Streamlit on 8501. Keeping the boot
+script in the repo means it is reviewable, and that editing it does not churn the
+template.
 
 ## Run it anywhere else
 

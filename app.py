@@ -5,6 +5,7 @@ this file only turns pipeline events into Streamlit widgets.
 
 import json
 import pathlib
+import re
 import threading
 import time
 import urllib.parse
@@ -16,11 +17,32 @@ import pipeline
 
 st.set_page_config(page_title="GitHub Story", page_icon="📖")
 
-# The box tunnels itself out through cloudflared and writes the resulting HTTPS
-# hostname here. Quick-tunnel URLs are random per boot, so the machine reporting
-# its own address is the only reliable way to learn it.
-_TUNNEL = pathlib.Path(__file__).parent / "tunnel_url.txt"
-PUBLIC_URL = _TUNNEL.read_text().strip() if _TUNNEL.exists() else ""
+# The box tunnels itself out through cloudflared, which picks a RANDOM hostname
+# every time it starts. A file written once at boot goes stale the moment the
+# tunnel reconnects under a new name -- observed exactly that. So read the live
+# log on each rerun and take the LAST hostname it announced, which is by
+# definition the current one.
+_CF_LOG = pathlib.Path("/tmp/cf.log")
+_TUNNEL_FILE = pathlib.Path(__file__).parent / "tunnel_url.txt"
+_HOSTNAME = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
+
+
+def public_url() -> str:
+    """Current tunnel hostname, or "" if there isn't one."""
+    try:
+        # The log grows unbounded; only the tail can hold the newest hostname.
+        size = _CF_LOG.stat().st_size
+        with _CF_LOG.open("rb") as fh:
+            fh.seek(max(0, size - 65536))
+            found = _HOSTNAME.findall(fh.read().decode("utf-8", "replace"))
+        if found:
+            return found[-1]
+    except OSError:
+        pass
+    try:
+        return _TUNNEL_FILE.read_text().strip()   # fallback for odd setups
+    except OSError:
+        return ""
 
 # The public Vast.ai template that launches this whole stack on a 4090.
 # Linking the repo rather than a console URL: the console is a single-page app
@@ -84,7 +106,7 @@ def share_controls(story: str, target: str) -> None:
         f"is written by a 30B model self-hosted on one RTX 4090 rented from Vast.ai."
     )
     intent = "https://x.com/intent/post?" + urllib.parse.urlencode(
-        {"text": teaser, "url": PUBLIC_URL or "https://github.com/Kilo-Loco/github-story"}
+        {"text": teaser, "url": public_url() or "https://github.com/Kilo-Loco/github-story"}
     )
 
     components.html(
@@ -197,6 +219,9 @@ st.caption(
     "**RTX 4090** rented from [Vast.ai](https://vast.ai) — no frontier API "
     "involved. Public commit history only."
 )
+_url = public_url()
+if _url:
+    st.caption(f"This instance is reachable at {_url}")
 st.caption(
     "Run your own on a 4090: "
     f"`vastai create instance <offer> --template_hash {TEMPLATE_HASH} --disk 60` · "

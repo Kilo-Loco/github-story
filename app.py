@@ -22,6 +22,12 @@ st.set_page_config(page_title="GitHub Story", page_icon="📖")
 _TUNNEL = pathlib.Path(__file__).parent / "tunnel_url.txt"
 PUBLIC_URL = _TUNNEL.read_text().strip() if _TUNNEL.exists() else ""
 
+# The public Vast.ai template that launches this whole stack on a 4090.
+# Linking the repo rather than a console URL: the console is a single-page app
+# that returns 200 for any path, so a template deep-link cannot be verified from
+# outside, and an unverified link in a footer is worse than none.
+TEMPLATE_HASH = "c66d0f469b333a0876fd52501847d268"
+
 
 # One story at a time. The site is public and every story is GPU time on a
 # single 4090, so a global lock is the whole abuse story: a second visitor
@@ -93,11 +99,11 @@ def share_controls(story: str, target: str) -> None:
           .btn {{
             flex:0 0 auto; padding:.5rem 1rem; border-radius:.5rem; cursor:pointer;
             font-size:.85rem; font-weight:500; text-decoration:none; line-height:1.4;
-            border:1px solid #4A4A57; background:#262730; color:#FAFAFA;
+            border:1px solid #555; background:#262730; color:#FFFFFF !important;
             transition:background .15s ease, border-color .15s ease;
           }}
           .btn:hover {{ background:#3A3B47; border-color:#6E6E7B; }}
-          .btn.x {{ background:#000; border-color:#000; }}
+          .btn.x {{ background:#000; border-color:#000; color:#FFFFFF !important; }}
           .btn.x:hover {{ background:#1a1a1a; border-color:#333; }}
         </style>
         <div class="row">
@@ -187,9 +193,12 @@ elif st.session_state.get("story"):
 
 st.divider()
 st.caption(
-    "Written by a self-hosted **Qwen3-Coder-30B** (Q4) on a single **RTX 4090** "
-    "rented from [Vast.ai](https://vast.ai) — no frontier API involved. "
-    "Public commit history only."
+    "Written by a self-hosted **Qwen3-Coder-30B-A3B** (Q4_K_M) on a single "
+    "**RTX 4090** rented from [Vast.ai](https://vast.ai) — no frontier API "
+    "involved. Public commit history only."
 )
-if PUBLIC_URL:
-    st.caption(f"HTTPS link for this session: {PUBLIC_URL}")
+st.caption(
+    "Run your own on a 4090: "
+    f"`vastai create instance <offer> --template_hash {TEMPLATE_HASH} --disk 60` · "
+    "[source & setup](https://github.com/Kilo-Loco/github-story)"
+)

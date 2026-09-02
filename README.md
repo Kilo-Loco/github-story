@@ -9,7 +9,7 @@ Children's story, or Grill me.
 
 ## Run it on Vast
 
-Public template: **[github-story-qwen3-coder-4090](TEMPLATE_URL_PLACEHOLDER)**
+Public template: **`github-story-qwen3-coder-4090`**
 (id `663584`) — model and app in one container.
 
 ```bash

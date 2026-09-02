@@ -67,13 +67,19 @@ not fit, so `pipeline.py` is a map/reduce: summarize each half-year period, then
 weave the summaries into one story. Two passes, one endpoint — not because of
 multiple GPUs, but because the input is bigger than the window.
 
-**Commit search is the obvious data source and the wrong one.** Measured:
-GitHub's secondary rate limit allows ~3 commit-search calls per 30s no matter
-how you pace them, and this needs ~10. It also matches on commit *email* across
-all of GitHub, so `author:torvalds` returns 429,964,072 results whose newest
-100 are from a repo he has never touched. The per-repo core endpoint
-(`/repos/{owner}/{repo}/commits?author=`) returned 3,066 commits in 3.2s using
-92 calls, left 4,953 of 5,000 unspent, and cannot be spoofed.
+**Commits come from one call per repo**, not from commit search:
+`/repos/{owner}/{repo}/commits?author=`, fanned out across the user's repos with
+a thread pool. Measured on a 91-repo profile: 3,066 commits in 3.2 seconds, 92
+calls, 4,953 of 5,000 requests still unspent.
+
+The obvious alternative — `/search/commits?q=author:X` — was tried first and
+rejected for two measured reasons. It can't sustain the volume: GitHub's
+secondary rate limit allows ~3 commit-search calls per 30s regardless of pacing,
+and a story needs ~10. And it matches on the commit's *email* across all of
+GitHub, so anyone can put your address in their git config: `author:torvalds`
+returns 429,964,072 results whose newest 100 are from a repo he has never
+touched. Asking each repo directly can only return commits from repos the user
+actually owns, so that's structurally impossible.
 
 ## Measured on a 4090
 

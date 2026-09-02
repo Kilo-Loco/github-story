@@ -192,26 +192,27 @@ def fetch_repo_context(target: Target) -> list[dict]:
     ]
 
 
-# Two ways to get someone's commits. The difference is not obvious until you
-# measure it, so I did — against simonw (91 public repos), on one token:
+# Commits come from ONE CALL PER REPO -- /repos/{owner}/{repo}/commits?author=X
+# -- fanned out with a thread pool. Measured against simonw (91 public repos):
+# 92 calls, 3.2s wall with 12 workers, 3,066 commits, and 4,953 of 5,000
+# requests still unspent.
 #
-#   /search/commits?q=author:X       10 calls needed, FAILS. GitHub's secondary
-#       rate limit allows ~3 commit-search calls per 30 seconds no matter how
-#       you pace them (measured: 8s spacing tripped at the 3rd call, recovery
-#       took 32s) while 24 of 30 primary requests were still unspent. Worse,
-#       it matches on the commit's AUTHOR EMAIL across every repo on GitHub:
-#       `author:torvalds` returns 429,964,072 results and the newest 100 are
-#       from a repo he has never touched, because anyone can set that email
-#       in their own git config.
+# The obvious alternative, /search/commits?q=author:X, was tried first and
+# rejected. Two measured reasons:
 #
-#   /repos/{owner}/{repo}/commits?author=X    92 calls, 3.2s wall with 12
-#       workers, 3,066 commits, and 4,953 of 5,000 requests still unspent.
-#       A different rate-limit bucket entirely, and it can only ever return
-#       commits from repos the user actually owns — spoofing is structurally
-#       impossible.
+#   It cannot sustain the volume. GitHub's secondary rate limit allows ~3
+#   commit-search calls per 30 seconds no matter how you pace them (8s spacing
+#   tripped at the 3rd call; recovery took 32s) while 24 of 30 primary requests
+#   were still unspent. A story needs ~10 calls.
 #
-# So this uses the core endpoint only. The tradeoff is that it cannot see
-# contributions to repos the user does not own; their own repos are the story.
+#   It matches on the commit's AUTHOR EMAIL across every repo on GitHub, and
+#   anyone can put your address in their git config. `author:torvalds` returns
+#   429,964,072 results whose newest 100 are from a repo he has never touched.
+#   Asking each repo directly can only return commits from repos the user
+#   actually owns, so that is structurally impossible here.
+#
+# The tradeoff: this cannot see contributions to repos the user does not own.
+# Their own repos are the story.
 MAX_REPOS_SCANNED = 60      # ~60 calls stays far inside the 5,000/hr core budget
 REPO_FETCH_WORKERS = 12     # measured: 91 repos in 3.2s, zero throttling
 

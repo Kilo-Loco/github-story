@@ -10,18 +10,7 @@ set -x
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update -qq
-apt-get install -y -qq python3-pip openssh-server
-
-# Vast does not inject an SSH server -- the image has to provide one, and the
-# llama.cpp image does not. Without this you get Vast's proxy banner followed by
-# "Permission denied (publickey)", because nothing is listening inside.
-# Vast writes the account's authorized_keys; this just runs the daemon.
-mkdir -p /var/run/sshd
-ssh-keygen -A
-sed -i 's|^#*AuthorizedKeysFile.*|AuthorizedKeysFile /root/.ssh/authorized_keys|' /etc/ssh/sshd_config
-sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
-/usr/sbin/sshd
-
+apt-get install -y -qq python3-pip
 pip3 install -q --break-system-packages -r /opt/app/requirements.txt \
   || pip3 install -q -r /opt/app/requirements.txt
 

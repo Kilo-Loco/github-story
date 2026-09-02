@@ -198,7 +198,7 @@ if st.button("Tell me their story", type="primary", disabled=not url.strip()):
                         "minutes to load after the site comes online. "
                         "Try again shortly."
                     )
-                elif "rate limit" in str(exc).lower():
+                elif "GITHUB_TOKEN" in str(exc) or "rate limit" in str(exc).lower():
                     st.warning(str(exc))
                 else:
                     st.error(str(exc) or name)

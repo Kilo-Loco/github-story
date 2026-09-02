@@ -141,6 +141,17 @@ def _get(url: str, params: dict | None = None, pace: float = 0.0) -> dict | list
         resp = requests.get(url, headers=_gh_headers(), params=params, timeout=15)
         _last_call_at[url] = time.monotonic()
 
+        if resp.status_code == 401:
+            # Almost always the template's placeholder token left unreplaced.
+            # Say so plainly; the alternative (a raw 401) sends people hunting
+            # through code for a problem that is one env var.
+            raise RuntimeError(
+                "GitHub rejected GITHUB_TOKEN (401). If you launched from the "
+                "Vast template, replace the placeholder with a real token — a "
+                "classic token with no scopes is enough — or remove the variable "
+                "entirely to run unauthenticated at 60 requests/hour."
+            )
+
         if resp.status_code in (403, 429):
             body = resp.text.lower()
             if "secondary rate limit" in body:

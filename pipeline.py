@@ -18,7 +18,6 @@ from __future__ import annotations
 import os
 import re
 import sys
-import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -101,7 +100,7 @@ def parse_github_url(url: str) -> Target:
 
 # ---------------------------------------------------------------------------
 # Step 1: fetch. Deliberately small surface:
-#   profile (1 call) + repo list (1 call) + commit search (2-10 calls).
+#   profile (1 call) + repo list (1-5 calls) + one call per repo.
 # We never fetch diffs or per-commit stats: that's 1 extra call per commit
 # and would blow both the rate limit and the context budget. Commit messages
 # are the narrative humans already wrote; we use those.
@@ -115,70 +114,27 @@ class Commit:
     repo: str
 
 
-# GitHub enforces TWO different limits and they fail in different ways:
-#   primary   — the documented quota (5,000/hr core, 30/min search). When it
-#               runs out, x-ratelimit-remaining is 0 and waiting is the only fix.
-#   secondary — an undocumented anti-burst throttle. Measured against the real
-#               API: ten back-to-back commit-search pages trip it while 24 of 30
-#               primary requests are still unspent. It is about REQUEST RATE,
-#               not quota, so the fix is to slow down, not to authenticate more.
-# Commit search is the most aggressively throttled endpoint GitHub has, and this
-# pipeline makes 10 search calls per story, so both paths matter here.
-SEARCH_MIN_INTERVAL = 2.0    # seconds between commit-search pages
-MAX_RETRIES = 4
+def _get(url: str, params: dict | None = None) -> dict | list:
+    resp = requests.get(url, headers=_gh_headers(), params=params, timeout=15)
 
-_last_call_at: dict[str, float] = {}
+    if resp.status_code == 401:
+        raise RuntimeError(
+            "GitHub rejected GITHUB_TOKEN (401). If you launched from the Vast "
+            "template, replace the placeholder with a real token — a classic "
+            "token with no scopes is enough — or remove the variable entirely "
+            "to run unauthenticated at 60 requests/hour."
+        )
+    if resp.status_code == 403 and resp.headers.get("x-ratelimit-remaining") == "0":
+        reset = resp.headers.get("x-ratelimit-reset", "")
+        when = (datetime.fromtimestamp(int(reset)).strftime("%H:%M:%S")
+                if reset.isdigit() else "shortly")
+        raise RuntimeError(
+            f"GitHub rate limit exhausted; it resets at {when}."
+            + ("" if GITHUB_TOKEN else " Set GITHUB_TOKEN to raise the limit.")
+        )
 
-
-def _get(url: str, params: dict | None = None, pace: float = 0.0) -> dict | list:
-    """GET with per-endpoint pacing and backoff on the secondary rate limit."""
-    for attempt in range(MAX_RETRIES):
-        if pace:
-            elapsed = time.monotonic() - _last_call_at.get(url, 0.0)
-            if elapsed < pace:
-                time.sleep(pace - elapsed)
-
-        resp = requests.get(url, headers=_gh_headers(), params=params, timeout=15)
-        _last_call_at[url] = time.monotonic()
-
-        if resp.status_code == 401:
-            # Almost always the template's placeholder token left unreplaced.
-            # Say so plainly; the alternative (a raw 401) sends people hunting
-            # through code for a problem that is one env var.
-            raise RuntimeError(
-                "GitHub rejected GITHUB_TOKEN (401). If you launched from the "
-                "Vast template, replace the placeholder with a real token — a "
-                "classic token with no scopes is enough — or remove the variable "
-                "entirely to run unauthenticated at 60 requests/hour."
-            )
-
-        if resp.status_code in (403, 429):
-            body = resp.text.lower()
-            if "secondary rate limit" in body:
-                # Honour Retry-After when GitHub sends one; otherwise back off
-                # exponentially (5s, 10s, 20s) and try the same page again.
-                delay = float(resp.headers.get("Retry-After", 5 * 2 ** attempt))
-                time.sleep(delay)
-                continue
-            if resp.headers.get("x-ratelimit-remaining") == "0":
-                reset = resp.headers.get("x-ratelimit-reset", "")
-                when = (
-                    datetime.fromtimestamp(int(reset)).strftime("%H:%M:%S")
-                    if reset.isdigit() else "shortly"
-                )
-                resource = resp.headers.get("x-ratelimit-resource", "api")
-                raise RuntimeError(
-                    f"GitHub {resource} rate limit exhausted; it resets at {when}."
-                    + ("" if GITHUB_TOKEN else " Set GITHUB_TOKEN to raise the limit.")
-                )
-
-        resp.raise_for_status()
-        return resp.json()
-
-    raise RuntimeError(
-        "GitHub kept returning its secondary rate limit. This usually means "
-        "several stories were requested back to back — wait a minute and retry."
-    )
+    resp.raise_for_status()
+    return resp.json()
 
 
 def fetch_profile(target: Target) -> dict:
@@ -254,10 +210,8 @@ def fetch_repo_context(target: Target) -> list[dict]:
 #       commits from repos the user actually owns — spoofing is structurally
 #       impossible.
 #
-# So per-repo is the backbone. ONE best-effort commit-search call is kept as a
-# garnish, because the backbone structurally cannot see contributions to repos
-# the user does NOT own (org and OSS work). If it 403s we skip it and carry on
-# with a slightly thinner story — never fail the request over a garnish.
+# So this uses the core endpoint only. The tradeoff is that it cannot see
+# contributions to repos the user does not own; their own repos are the story.
 MAX_REPOS_SCANNED = 60      # ~60 calls stays far inside the 5,000/hr core budget
 REPO_FETCH_WORKERS = 12     # measured: 91 repos in 3.2s, zero throttling
 
@@ -302,31 +256,6 @@ def _select_repos(repos: list[dict], limit: int) -> list[str]:
     return [r["full_name"] for r in ordered]
 
 
-def _search_supplement(login: str, owned: set[str]) -> list[Commit]:
-    """Best-effort, one call: commits in repos the user does NOT own. Forks are
-    dropped (mirrors of other people's work aren't their story) and so are
-    repos the backbone already covered."""
-    try:
-        data = _get(
-            f"{GITHUB_API}/search/commits",
-            params={"q": f"author:{login}", "sort": "author-date",
-                    "order": "desc", "per_page": COMMITS_PER_PAGE},
-            pace=SEARCH_MIN_INTERVAL,
-        )
-    except Exception:
-        return []   # throttled or unavailable — the story survives without it
-    out: list[Commit] = []
-    for item in data.get("items", []):
-        repo = item.get("repository", {})
-        full = repo.get("full_name", "")
-        if repo.get("fork") or full in owned or not full:
-            continue
-        parsed = _parse_commit(item, repo.get("name", ""))
-        if parsed:
-            out.append(parsed)
-    return out
-
-
 def fetch_commits(target: Target, repos: list[dict]) -> list[Commit]:
     """Fan out across the user's repos in parallel, then dedupe by SHA."""
     if target.kind == "repo":
@@ -337,7 +266,6 @@ def fetch_commits(target: Target, repos: list[dict]) -> list[Commit]:
         batches = pool.map(lambda n: _commits_from_repo(n, target.owner), names)
 
     collected = [c for batch in batches for c in batch]
-    collected += _search_supplement(target.owner, owned=set(names))
 
     seen: set[str] = set()
     merged: list[Commit] = []

@@ -14,7 +14,7 @@ Public template: **[github-story-qwen3-coder-4090](TEMPLATE_URL_PLACEHOLDER)**
 
 ```bash
 vastai create instance <OFFER_ID> \
-  --template_hash f93e10a9bfafc40561b9b98b112c3440 --disk 60
+  --template_hash e5b9367fcdcdacbee8c00dc6a3d41de0 --disk 60
 ```
 
 Any RTX 4090 with 60 GB disk. Replace `GITHUB_TOKEN` in the launch dialog with a

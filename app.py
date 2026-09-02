@@ -3,28 +3,26 @@ app.py — the entire UI. Everything with substance lives in pipeline.py;
 this file only turns pipeline events into Streamlit widgets.
 """
 
-import json
 import threading
 import time
 import urllib.parse
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 import pipeline
 
 st.set_page_config(page_title="GitHub Story", page_icon="📖")
 
-# One story at a time. The site is public and every story is GPU time on a
-# single 4090, so a global lock is the whole abuse story: a second visitor
-# waits rather than queueing a parallel decode that halves everyone's speed.
-#
-# It carries a timestamp because a plain lock is not safe here. If a visitor
-# closes the tab mid-story, Streamlit kills the script thread and the `with`
-# block never unwinds, so the lock is held forever and the site is wedged for
-# everyone until the process restarts. Observed exactly that. So we record when
-# the lock was taken and reclaim it once no story could still plausibly be
-# running.
+# Vast's "referral link" addresses a template by name and creator, so it survives
+# edits. Their other share link embeds hash_id, which Vast rotates on every edit.
+TEMPLATE_URL = (
+    "https://cloud.vast.ai/?ref_id=667524&creator_id=667524&name=github-story"
+)
+
+# One story at a time: the site is public and every story is GPU time on a
+# single 4090. The timestamp matters because a visitor who closes the tab
+# mid-story kills the script thread without releasing the lock, wedging the site
+# for everyone. Reclaim it once no story could still be running.
 STALE_AFTER = 180  # seconds; a full story takes ~25
 
 
@@ -57,58 +55,16 @@ def _cached_fetch(url: str) -> dict:
     return pipeline.fetch_all(url)
 
 
-def share_controls(story: str, target: str) -> None:
-    """Copy-to-clipboard and share-on-X.
-
-    Streamlit has no native copy button for prose (st.code gives you one, but
-    renders monospace, which reads badly for a story). So this is a small
-    self-contained HTML block: json.dumps safely escapes the story into a JS
-    string literal, including the quotes and newlines a story is full of.
-    """
+def share_button(target: str) -> None:
+    """Native link button. Streamlit has no copy-to-clipboard widget, and hand
+    rolling one means shipping HTML, CSS and JS inside a Python f-string for a
+    button people can replace by selecting the text."""
     teaser = (
-        f"I ran {target}'s commit history through GitHub Story — the whole thing "
-        f"is written by a 30B model self-hosted on one RTX 4090 rented from Vast.ai."
+        f"I ran {target}'s commit history through GitHub Story — written by a 30B "
+        f"model self-hosted on one RTX 4090 rented from Vast.ai."
     )
-    intent = "https://x.com/intent/post?" + urllib.parse.urlencode(
-        {"text": teaser, "url": "https://github.com/Kilo-Loco/github-story"}
-    )
-
-    components.html(
-        f"""
-        <style>
-          /* components.html renders in an IFRAME, which does not inherit
-             Streamlit's theme. "color: inherit" resolves against the iframe's
-             own default styles, not the app's, so the labels came out nearly
-             invisible. Every colour here is therefore explicit, and chosen to
-             hold contrast against both the light and dark Streamlit themes. */
-          .row {{ display:flex; gap:.5rem; font-family:-apple-system,system-ui,sans-serif; }}
-          .btn {{
-            flex:0 0 auto; padding:.5rem 1rem; border-radius:.5rem; cursor:pointer;
-            font-size:.85rem; font-weight:500; text-decoration:none; line-height:1.4;
-            border:1px solid #555; background:#262730; color:#FFFFFF !important;
-            transition:background .15s ease, border-color .15s ease;
-          }}
-          .btn:hover {{ background:#3A3B47; border-color:#6E6E7B; }}
-          .btn.x {{ background:#000; border-color:#000; color:#FFFFFF !important; }}
-          .btn.x:hover {{ background:#1a1a1a; border-color:#333; }}
-        </style>
-        <div class="row">
-          <button class="btn" id="c" onclick="copyStory()">Copy story</button>
-          <a class="btn x" href="{intent}" target="_blank" rel="noopener">Share on 𝕏</a>
-        </div>
-        <script>
-          const STORY = {json.dumps(story)};
-          function copyStory() {{
-            navigator.clipboard.writeText(STORY).then(() => {{
-              const b = document.getElementById("c");
-              b.textContent = "Copied";
-              setTimeout(() => b.textContent = "Copy story", 1600);
-            }});
-          }}
-        </script>
-        """,
-        height=56,
-    )
+    st.link_button("Share on X", "https://x.com/intent/post?" + urllib.parse.urlencode(
+        {"text": teaser, "url": "https://github.com/Kilo-Loco/github-story"}))
 
 
 st.title("📖 GitHub Story")
@@ -125,57 +81,51 @@ if st.button("Tell me their story", type="primary", disabled=not url.strip()):
         st.warning("Someone else's story is generating right now — try again in a minute.")
     else:
         try:
-            try:
-                with st.status("Reading public history...", expanded=True) as status:
-                    events = pipeline.run(url, prefetched=_cached_fetch(url), voice=voice)
-                    first_chunk = None
-                    for event in events:
-                        if event["type"] == "status":
-                            status.update(label=event["text"])
-                            st.write(event["text"])
-                        else:
-                            first_chunk = event      # story has started
-                            break
-                    status.update(label="Story written", state="complete", expanded=False)
+            with st.status("Reading public history...", expanded=True) as status:
+                events = pipeline.run(url, prefetched=_cached_fetch(url), voice=voice)
+                first_chunk = None
+                for event in events:
+                    if event["type"] == "status":
+                        status.update(label=event["text"])
+                        st.write(event["text"])
+                    else:
+                        first_chunk = event      # story has started
+                        break
+                status.update(label="Story written", state="complete", expanded=False)
 
-                def story_stream():
-                    """Resume the same generator: the status loop above stopped
-                    at the first chunk, so hand that one over and keep going."""
-                    if first_chunk:
-                        yield first_chunk["text"]
-                    for event in events:
-                        yield event["text"]
+            def story_stream():
+                """Resume the same generator: the status loop above stopped at
+                the first chunk, so hand that one over and keep going."""
+                if first_chunk:
+                    yield first_chunk["text"]
+                for event in events:
+                    yield event["text"]
 
-                st.session_state["story"] = st.write_stream(story_stream())
-                st.session_state["story_url"] = url
-                share_controls(st.session_state["story"], url.rstrip("/").split("/")[-1])
+            st.session_state["story"] = st.write_stream(story_stream())
+            st.session_state["story_url"] = url
+            share_button(url.rstrip("/").split("/")[-1])
 
-            except Exception as exc:
-                # The model takes ~25 minutes to download and load, while the app
-                # is serving within 90 seconds. Anyone who arrives in that window
-                # gets a connection error, so say what is actually happening
-                # instead of showing them a Python exception name.
-                name = type(exc).__name__
-                if "Connection" in name or "APIError" in name or "Timeout" in name:
-                    st.warning(
-                        "The GPU is still waking up — the model takes a few "
-                        "minutes to load after the site comes online. "
-                        "Try again shortly."
-                    )
-                elif "GITHUB_TOKEN" in str(exc) or "rate limit" in str(exc).lower():
-                    st.warning(str(exc))
-                else:
-                    st.error(str(exc) or name)
+        except Exception as exc:
+            # The app serves in ~90 seconds; the model needs several minutes more
+            # to load. Anyone arriving in that window gets a connection error, so
+            # say what is happening instead of showing a Python exception name.
+            name = type(exc).__name__
+            if "Connection" in name or "APIError" in name or "Timeout" in name:
+                st.warning(
+                    "The GPU is still waking up — the model takes a few minutes "
+                    "to load after the site comes online. Try again shortly."
+                )
+            elif "GITHUB_TOKEN" in str(exc) or "rate limit" in str(exc).lower():
+                st.warning(str(exc))
+            else:
+                st.error(str(exc) or name)
         finally:
             _release_gpu()
 
 # Survive the rerun that any later widget interaction causes.
 elif st.session_state.get("story"):
     st.markdown(st.session_state["story"])
-    share_controls(
-        st.session_state["story"],
-        st.session_state.get("story_url", "").rstrip("/").split("/")[-1],
-    )
+    share_button(st.session_state.get("story_url", "").rstrip("/").split("/")[-1])
 
 st.divider()
 st.caption(

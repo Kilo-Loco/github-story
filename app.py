@@ -49,6 +49,13 @@ def _release_gpu() -> None:
         pass   # already released, or we stole it from a dead holder
 
 
+# Cached for a few seconds: Streamlit reruns on every widget interaction, and
+# there is no point re-probing the model on each one.
+@st.cache_data(ttl=10, show_spinner=False)
+def _model_ready() -> bool:
+    return pipeline.model_ready()
+
+
 # Same profile twice inside an hour = zero GitHub calls. Cheapest guard there is.
 @st.cache_data(ttl=3600, show_spinner=False)
 def _cached_fetch(url: str) -> dict:
@@ -70,13 +77,23 @@ def share_button(target: str) -> None:
 st.title("📖 GitHub Story")
 st.caption("Paste a GitHub profile or repo. Get the story of what they've been building.")
 
+ready = _model_ready()
+if not ready:
+    st.info(
+        "**Warming up.** The app boots in about 90 seconds; the 18.56 GB model "
+        "takes several minutes more to download and load onto the GPU. "
+        "Refresh in a bit.",
+        icon="⏳",
+    )
+
 url = st.text_input("GitHub profile or repo URL", placeholder="https://github.com/torvalds")
 voice = st.selectbox("Narrator", list(pipeline.STORY_VOICES))
 
 # Gate on a button, not on the text input: Streamlit reruns the whole script on
 # every widget interaction, and an ungated pipeline would refetch and regenerate
 # each time.
-if st.button("Tell me their story", type="primary", disabled=not url.strip()):
+if st.button("Tell me their story", type="primary",
+             disabled=not url.strip() or not ready):
     if not _acquire_gpu():
         st.warning("Someone else's story is generating right now — try again in a minute.")
     else:

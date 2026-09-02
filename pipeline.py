@@ -346,6 +346,20 @@ def _sample_evenly(commits: list[Commit], limit: int) -> list[Commit]:
 _client = OpenAI(base_url=MODEL_BASE_URL, api_key=os.environ.get("MODEL_API_KEY", "not-needed"))
 
 
+def model_ready() -> bool:
+    """Is llama.cpp serving yet?
+
+    It answers /health with 503 while the weights load and 200 once resident,
+    which matters because the app is up within ~90s of boot while the model
+    needs several minutes more. MODEL_BASE_URL ends in /v1; /health does not
+    live under it."""
+    try:
+        root = MODEL_BASE_URL.rsplit("/v1", 1)[0]
+        return requests.get(f"{root}/health", timeout=2).status_code == 200
+    except requests.RequestException:
+        return False
+
+
 def summarize_period(label: str, commits: list[Commit]) -> str:
     commits = _sample_evenly(commits, MAX_COMMITS_PER_PERIOD)
     lines = "\n".join(f"[{c.repo}] {c.message}" for c in commits)
